@@ -6,8 +6,8 @@ import { createInitialCameraState, updateCameraState } from "./camera";
 
 const INITIAL_INSTANCE_BYTES = 64 * 1024;
 const TRAIL_HISTORY = 48;
-const CHASE_BEHIND_M = 120000;
-const CHASE_ABOVE_M = 40000;
+const CHASE_BEHIND_M = 4000;
+const CHASE_ABOVE_M = 900;
 
 const asGpuSource = (data: Float32Array): GPUAllowSharedBufferSource => {
   if (data.buffer instanceof ArrayBuffer && data.byteOffset === 0 && data.byteLength === data.buffer.byteLength) {
@@ -195,7 +195,8 @@ export class WebGpuCombatRenderer implements Renderer {
       chasePose
     });
     const aspect = this.canvas.width / this.canvas.height;
-    const projection = mat4Perspective((50 * Math.PI) / 180, aspect, 0.01, 100);
+    const nearPlane = this.computeNearPlane();
+    const projection = mat4Perspective((50 * Math.PI) / 180, aspect, nearPlane, 100);
     const view = mat4LookAt(this.cameraState.eye, this.cameraState.target, this.cameraState.up);
     const viewProj = mat4Multiply(projection, view);
 
@@ -456,6 +457,14 @@ export class WebGpuCombatRenderer implements Renderer {
     const up: Vec3 = Math.hypot(upWorld[0], upWorld[1], upWorld[2]) < 1e-6 ? [0, 0, 1] : upWorld;
 
     return { eye, target, up };
+  }
+
+  private computeNearPlane(): number {
+    const dx = this.cameraState.eye[0] - this.cameraState.target[0];
+    const dy = this.cameraState.eye[1] - this.cameraState.target[1];
+    const dz = this.cameraState.eye[2] - this.cameraState.target[2];
+    const distance = Math.hypot(dx, dy, dz);
+    return Math.max(1e-6, Math.min(0.01, distance * 0.25));
   }
 
   private writeInstanceData(kind: "entity" | "trail" | "event", data: Float32Array): void {
