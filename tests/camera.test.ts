@@ -1,20 +1,62 @@
 import { describe, expect, it } from "vitest";
-import { createInitialCameraState, updateCameraState } from "../src/render/webgpu";
+import { applyCameraPreset, createInitialCameraState, updateCameraState } from "../src/render/webgpu";
+
+const noInput = {
+  orbitDelta: [0, 0] as [number, number],
+  panDelta: [0, 0] as [number, number],
+  zoomDelta: 0,
+  isInteracting: false
+};
 
 describe("camera mode", () => {
   it("keeps static camera eye stable", () => {
     const state0 = createInitialCameraState();
-    const state1 = updateCameraState(state0, "static", 10);
-    const state2 = updateCameraState(state1, "static", 10);
+    const state1 = updateCameraState(state0, { mode: "static", dtSec: 10, input: noInput });
+    const state2 = updateCameraState(state1, { mode: "static", dtSec: 10, input: noInput });
     expect(state0.eye).toEqual(state1.eye);
     expect(state1.eye).toEqual(state2.eye);
   });
 
-  it("moves orbit camera over time", () => {
+  it("moves orbit camera at a 24-hour period", () => {
     const state0 = createInitialCameraState();
-    const state1 = updateCameraState(state0, "orbit", 10);
-    expect(state1.eye[0]).not.toBe(state0.eye[0]);
-    expect(state1.eye[1]).not.toBe(state0.eye[1]);
+    const state1 = updateCameraState(state0, { mode: "orbit", dtSec: 3600, input: noInput });
+    const yawDelta = state1.yawRad - state0.yawRad;
+    const expected = (2 * Math.PI) / 24;
+    expect(yawDelta).toBeCloseTo(expected, 8);
+  });
+
+  it("applies distance and pitch constraints", () => {
+    const state0 = createInitialCameraState();
+    const state1 = updateCameraState(state0, {
+      mode: "static",
+      dtSec: 0,
+      input: {
+        ...noInput,
+        orbitDelta: [0, 100],
+        zoomDelta: -100
+      }
+    });
+    expect(state1.pitchRad).toBeLessThanOrEqual(1.25);
+    expect(state1.distance).toBeGreaterThanOrEqual(1.15);
+  });
+
+  it("locks target in entity lock mode", () => {
+    const state0 = createInitialCameraState();
+    const lockTarget: [number, number, number] = [0.5, -0.3, 0.1];
+    const state1 = updateCameraState(state0, {
+      mode: "entityLock",
+      dtSec: 0.016,
+      input: noInput,
+      entityLockTarget: lockTarget
+    });
+    expect(state1.target).toEqual(lockTarget);
+  });
+
+  it("applies presets", () => {
+    const state0 = createInitialCameraState();
+    const state1 = applyCameraPreset(state0, "wide");
+    const state2 = applyCameraPreset(state1, "close");
+    expect(state1.distance).toBeGreaterThan(state0.distance);
+    expect(state2.distance).toBeLessThan(state1.distance);
   });
 });
-

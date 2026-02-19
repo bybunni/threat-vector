@@ -1,7 +1,7 @@
 import { generateDemoScenario, TimelineStore } from "./core/sim";
 import { WebGpuCombatRenderer } from "./render";
-import type { CameraMode, RenderOptions, SimulationContext } from "./render";
-import { HudController } from "./ui/controls";
+import type { CameraMode, CameraPreset, RenderOptions, SimulationContext } from "./render";
+import { CameraInputController, HudController } from "./ui";
 
 export class ThreatVectorApp {
   private readonly canvas: HTMLCanvasElement;
@@ -11,6 +11,8 @@ export class ThreatVectorApp {
   private readonly renderer: WebGpuCombatRenderer;
 
   private readonly hud: HudController;
+
+  private readonly cameraInput: CameraInputController;
 
   private playing = true;
 
@@ -22,13 +24,20 @@ export class ThreatVectorApp {
 
   private lastFrameTs = 0;
 
-  private readonly cameraMode: CameraMode = "static";
+  private cameraMode: CameraMode = "static";
+
+  private cameraTargetEntityId: string | null = null;
+
+  private cameraPresetRequest: CameraPreset | undefined;
+
+  private lastEntityListKey = "";
 
   private options: RenderOptions = { showGrid: true, showTrails: true, showEvents: true };
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.renderer = new WebGpuCombatRenderer(canvas);
+    this.cameraInput = new CameraInputController(canvas);
     this.hud = new HudController({
       onTogglePlay: (playing) => {
         this.playing = playing;
@@ -42,6 +51,20 @@ export class ThreatVectorApp {
       },
       onLayerToggle: (state) => {
         this.options = { ...this.options, ...state };
+      },
+      onCameraMode: (mode) => {
+        this.cameraMode = mode;
+        this.hud.setCameraMode(mode);
+      },
+      onCameraTarget: (entityId) => {
+        this.cameraTargetEntityId = entityId;
+        if (entityId) {
+          this.cameraMode = "entityLock";
+          this.hud.setCameraMode(this.cameraMode);
+        }
+      },
+      onCameraPreset: (preset) => {
+        this.cameraPresetRequest = preset;
       }
     });
   }
@@ -52,6 +75,7 @@ export class ThreatVectorApp {
     this.timeline.setFrames(frames);
     this.range = this.timeline.getRange();
     this.currentTime = this.range.start;
+    this.hud.setFrameModel("ECEF");
     this.hud.setCameraMode(this.cameraMode);
 
     try {
@@ -84,9 +108,14 @@ export class ThreatVectorApp {
 
   private renderAtCurrentTime(dtSec: number): void {
     const sample = this.timeline.sampleAt(this.currentTime);
+    this.refreshCameraTargetOptions(sample.entities.map((entity) => entity.id));
     const simContext: SimulationContext = {
-      cameraMode: this.cameraMode
+      cameraMode: this.cameraMode,
+      cameraTargetEntityId: this.cameraTargetEntityId ?? undefined,
+      userInput: this.cameraInput.consumeFrameInput(),
+      cameraPresetRequest: this.cameraPresetRequest
     };
+    this.cameraPresetRequest = undefined;
     if (this.renderer.isReady()) {
       this.renderer.render(sample, dtSec, this.options, simContext);
     }
@@ -102,5 +131,18 @@ export class ThreatVectorApp {
     };
     window.addEventListener("resize", resize);
     resize();
+  }
+
+  private refreshCameraTargetOptions(entityIds: string[]): void {
+    const uniqueSorted = [...new Set(entityIds)].sort();
+    if (this.cameraTargetEntityId && !uniqueSorted.includes(this.cameraTargetEntityId)) {
+      this.cameraTargetEntityId = null;
+    }
+    const key = uniqueSorted.join("|");
+    if (key === this.lastEntityListKey) {
+      return;
+    }
+    this.lastEntityListKey = key;
+    this.hud.setCameraTargets(uniqueSorted, this.cameraTargetEntityId);
   }
 }
