@@ -54,9 +54,29 @@ describe("camera mode", () => {
 
   it("applies presets", () => {
     const state0 = createInitialCameraState();
-    const state1 = applyCameraPreset(state0, "wide");
+    const state1 = applyCameraPreset(state0, "chase");
     const state2 = applyCameraPreset(state1, "close");
-    expect(state1.distance).toBeGreaterThan(state0.distance);
+    expect(state1.chaseEnabled).toBe(true);
     expect(state2.distance).toBeLessThan(state1.distance);
+    expect(state2.chaseEnabled).toBe(false);
+  });
+
+  it("uses chase pose when chase preset is enabled", () => {
+    const state0 = createInitialCameraState();
+    const chasePreset = applyCameraPreset(state0, "chase");
+    const chasePose = {
+      eye: [0.1, 0.2, 0.3] as [number, number, number],
+      target: [0.0, 0.1, 0.2] as [number, number, number],
+      up: [0, 0, 1] as [number, number, number]
+    };
+    const state1 = updateCameraState(chasePreset, {
+      mode: "entityLock",
+      dtSec: 0.016,
+      input: noInput,
+      entityLockTarget: chasePose.target,
+      chasePose
+    });
+    expect(state1.eye).toEqual(chasePose.eye);
+    expect(state1.target).toEqual(chasePose.target);
   });
 });

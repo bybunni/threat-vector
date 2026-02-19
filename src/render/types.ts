@@ -7,7 +7,7 @@ export interface RenderOptions {
 }
 
 export type CameraMode = "static" | "orbit" | "entityLock";
-export type CameraPreset = "tactical" | "wide" | "close";
+export type CameraPreset = "tactical" | "chase" | "close";
 
 export interface CameraInputState {
   orbitDelta: [number, number];

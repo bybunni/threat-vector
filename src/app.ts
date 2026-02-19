@@ -65,6 +65,10 @@ export class ThreatVectorApp {
       },
       onCameraPreset: (preset) => {
         this.cameraPresetRequest = preset;
+        if (preset === "chase") {
+          this.cameraMode = "entityLock";
+          this.hud.setCameraMode(this.cameraMode);
+        }
       }
     });
   }

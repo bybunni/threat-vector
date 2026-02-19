@@ -13,7 +13,7 @@ const ZOOM_SENSITIVITY = 0.85;
 
 const CAMERA_PRESETS: Record<CameraPreset, { distance: number; pitchRad: number }> = {
   tactical: { distance: 2.4, pitchRad: 0.45 },
-  wide: { distance: 4.2, pitchRad: 0.35 },
+  chase: { distance: 2.4, pitchRad: 0.45 },
   close: { distance: 1.35, pitchRad: 0.55 }
 };
 
@@ -51,6 +51,7 @@ export interface CameraState {
   yawRad: number;
   pitchRad: number;
   distance: number;
+  chaseEnabled: boolean;
   eye: [number, number, number];
   target: [number, number, number];
   up: [number, number, number];
@@ -62,6 +63,11 @@ interface CameraUpdateParams {
   input: CameraInputState;
   presetRequest?: CameraPreset;
   entityLockTarget?: [number, number, number] | null;
+  chasePose?: {
+    eye: [number, number, number];
+    target: [number, number, number];
+    up: [number, number, number];
+  } | null;
 }
 
 const zeroInput: CameraInputState = {
@@ -101,6 +107,7 @@ export const createInitialCameraState = (): CameraState => {
     yawRad,
     pitchRad,
     distance,
+    chaseEnabled: false,
     eye: frame.eye,
     target,
     up: frame.up
@@ -108,12 +115,19 @@ export const createInitialCameraState = (): CameraState => {
 };
 
 export const applyCameraPreset = (state: CameraState, preset: CameraPreset): CameraState => {
+  if (preset === "chase") {
+    return {
+      ...state,
+      chaseEnabled: true
+    };
+  }
   const p = CAMERA_PRESETS[preset];
   const nextPitch = clamp(p.pitchRad, PITCH_MIN_RAD, PITCH_MAX_RAD);
   const nextDistance = clamp(p.distance, DIST_MIN, DIST_MAX);
   const frame = toCameraFrame(state.target, state.yawRad, nextPitch, nextDistance);
   return {
     ...state,
+    chaseEnabled: false,
     pitchRad: nextPitch,
     distance: nextDistance,
     eye: frame.eye,
@@ -136,6 +150,15 @@ export const updateCameraState = (prev: CameraState, params: CameraUpdateParams)
 
   if (params.mode === "entityLock" && params.entityLockTarget) {
     target = params.entityLockTarget;
+  }
+
+  if (params.mode === "entityLock" && state.chaseEnabled && params.chasePose) {
+    return {
+      ...state,
+      target: params.chasePose.target,
+      eye: params.chasePose.eye,
+      up: params.chasePose.up
+    };
   }
 
   if (params.mode === "orbit" && !input.isInteracting) {
@@ -161,6 +184,7 @@ export const updateCameraState = (prev: CameraState, params: CameraUpdateParams)
     yawRad,
     pitchRad,
     distance,
+    chaseEnabled: state.chaseEnabled,
     eye: frame.eye,
     target,
     up: frame.up

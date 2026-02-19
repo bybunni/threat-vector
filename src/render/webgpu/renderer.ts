@@ -1,4 +1,4 @@
-import { ecefToWorld, llaToEcef, mat4LookAt, mat4Multiply, mat4Perspective } from "../../core/math";
+import { ecefToWorld, llaToEcef, mat4LookAt, mat4Multiply, mat4Perspective, nedBasisAtLla } from "../../core/math";
 import type { EntityState, FrameMessage } from "../../core/schema";
 import { createGlobeGridPass, createSpritePass } from "../passes";
 import type { RenderOptions, Renderer, SimulationContext } from "../types";
@@ -6,6 +6,8 @@ import { createInitialCameraState, updateCameraState } from "./camera";
 
 const INITIAL_INSTANCE_BYTES = 64 * 1024;
 const TRAIL_HISTORY = 48;
+const CHASE_BEHIND_M = 120000;
+const CHASE_ABOVE_M = 40000;
 
 const asGpuSource = (data: Float32Array): GPUAllowSharedBufferSource => {
   if (data.buffer instanceof ArrayBuffer && data.byteOffset === 0 && data.byteLength === data.buffer.byteLength) {
@@ -33,7 +35,56 @@ const domainColor = (entity: EntityState): [number, number, number, number] => {
 };
 
 const instanceSize = (entity: EntityState): number => (entity.kind === "weapon" ? 0.0035 : 0.0055);
-type WorldEntity = { entity: EntityState; world: [number, number, number] };
+type Vec3 = [number, number, number];
+type WorldEntity = { entity: EntityState; world: Vec3; ecef: Vec3 };
+
+const add3 = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const scale3 = (v: Vec3, s: number): Vec3 => [v[0] * s, v[1] * s, v[2] * s];
+const dot3 = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross3 = (a: Vec3, b: Vec3): Vec3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0]
+];
+const normalize3 = (v: Vec3): Vec3 => {
+  const len = Math.hypot(v[0], v[1], v[2]);
+  if (len < 1e-12) {
+    return [0, 0, 0];
+  }
+  return [v[0] / len, v[1] / len, v[2] / len];
+};
+
+const quatNormalize = (q: [number, number, number, number]): [number, number, number, number] => {
+  const n = Math.hypot(q[0], q[1], q[2], q[3]);
+  if (n < 1e-12) {
+    return [0, 0, 0, 1];
+  }
+  return [q[0] / n, q[1] / n, q[2] / n, q[3] / n];
+};
+
+const quatRotateVec = (qRaw: [number, number, number, number], v: Vec3): Vec3 => {
+  const q = quatNormalize(qRaw);
+  const u: Vec3 = [q[0], q[1], q[2]];
+  const s = q[3];
+  const uv = dot3(u, v);
+  const uu = dot3(u, u);
+  const term1 = scale3(u, 2 * uv);
+  const term2 = scale3(v, s * s - uu);
+  const term3 = scale3(cross3(u, v), 2 * s);
+  return add3(add3(term1, term2), term3);
+};
+
+const nedToEcefDelta = (lla: [number, number, number], ned: Vec3): Vec3 => {
+  const basis = nedBasisAtLla(lla);
+  return add3(add3(scale3(basis.north, ned[0]), scale3(basis.east, ned[1])), scale3(basis.down, ned[2]));
+};
+
+const worldDeltaFromEcefDelta = (baseEcef: Vec3, deltaEcef: Vec3): Vec3 => {
+  const baseWorld = ecefToWorld(baseEcef);
+  const offsetWorld = ecefToWorld(add3(baseEcef, deltaEcef));
+  return [offsetWorld[0] - baseWorld[0], offsetWorld[1] - baseWorld[1], offsetWorld[2] - baseWorld[2]];
+};
+
 const distSq3 = (a: [number, number, number], b: [number, number, number]): number => {
   const dx = a[0] - b[0];
   const dy = a[1] - b[1];
@@ -132,13 +183,16 @@ export class WebGpuCombatRenderer implements Renderer {
     }
 
     const worldEntities = this.toWorldEntities(frame.entities);
-    const entityLockTarget = this.resolveEntityLockTarget(worldEntities, simContext.cameraTargetEntityId);
+    const lockEntity = this.resolveEntityLockTarget(worldEntities, simContext.cameraTargetEntityId);
+    const entityLockTarget = lockEntity?.world ?? null;
+    const chasePose = lockEntity ? this.buildChasePose(lockEntity) : null;
     this.cameraState = updateCameraState(this.cameraState, {
       mode: simContext.cameraMode,
       dtSec,
       input: simContext.userInput,
       presetRequest: simContext.cameraPresetRequest,
-      entityLockTarget
+      entityLockTarget,
+      chasePose
     });
     const aspect = this.canvas.width / this.canvas.height;
     const projection = mat4Perspective((50 * Math.PI) / 180, aspect, 0.01, 100);
@@ -343,23 +397,27 @@ export class WebGpuCombatRenderer implements Renderer {
   }
 
   private toWorldEntities(entities: EntityState[]): WorldEntity[] {
-    return entities.map((entity) => ({
-      entity,
-      world: ecefToWorld(llaToEcef(entity.pose.positionLlaDegM))
-    }));
+    return entities.map((entity) => {
+      const ecef = llaToEcef(entity.pose.positionLlaDegM);
+      return {
+        entity,
+        ecef,
+        world: ecefToWorld(ecef)
+      };
+    });
   }
 
   private resolveEntityLockTarget(
     worldEntities: WorldEntity[],
     targetEntityId: string | undefined
-  ): [number, number, number] | null {
+  ): WorldEntity | null {
     if (worldEntities.length === 0) {
       return null;
     }
     if (targetEntityId) {
       const direct = worldEntities.find((item) => item.entity.id === targetEntityId);
       if (direct) {
-        return direct.world;
+        return direct;
       }
     }
     let best = worldEntities[0];
@@ -372,7 +430,32 @@ export class WebGpuCombatRenderer implements Renderer {
         best = candidate;
       }
     }
-    return best.world;
+    return best;
+  }
+
+  private buildChasePose(lockEntity: WorldEntity): { eye: Vec3; target: Vec3; up: Vec3 } {
+    const lla = lockEntity.entity.pose.positionLlaDegM;
+    const bodyToNed = lockEntity.entity.pose.orientationBodyToNedQuat;
+    const forwardNedRaw = quatRotateVec(bodyToNed, [1, 0, 0]);
+    const forwardNed = normalize3(forwardNedRaw);
+    const safeForwardNed: Vec3 =
+      Math.hypot(forwardNed[0], forwardNed[1], forwardNed[2]) < 1e-6 ? [1, 0, 0] : forwardNed;
+
+    const chaseOffsetNed: Vec3 = [
+      -safeForwardNed[0] * CHASE_BEHIND_M,
+      -safeForwardNed[1] * CHASE_BEHIND_M,
+      -safeForwardNed[2] * CHASE_BEHIND_M - CHASE_ABOVE_M
+    ];
+    const chaseOffsetEcef = nedToEcefDelta(lla, chaseOffsetNed);
+    const eyeEcef = add3(lockEntity.ecef, chaseOffsetEcef);
+    const eye = ecefToWorld(eyeEcef);
+    const target = lockEntity.world;
+
+    const upEcef = nedToEcefDelta(lla, [0, 0, -1]);
+    const upWorld = normalize3(worldDeltaFromEcefDelta(lockEntity.ecef, upEcef));
+    const up: Vec3 = Math.hypot(upWorld[0], upWorld[1], upWorld[2]) < 1e-6 ? [0, 0, 1] : upWorld;
+
+    return { eye, target, up };
   }
 
   private writeInstanceData(kind: "entity" | "trail" | "event", data: Float32Array): void {

@@ -36,7 +36,7 @@ export class HudController {
 
   private readonly cameraPresetTacticalEl = document.querySelector<HTMLButtonElement>("#cameraPresetTactical");
 
-  private readonly cameraPresetWideEl = document.querySelector<HTMLButtonElement>("#cameraPresetWide");
+  private readonly cameraPresetChaseEl = document.querySelector<HTMLButtonElement>("#cameraPresetChase");
 
   private readonly cameraPresetCloseEl = document.querySelector<HTMLButtonElement>("#cameraPresetClose");
 
@@ -110,7 +110,7 @@ export class HudController {
     });
 
     this.cameraPresetTacticalEl!.addEventListener("click", () => callbacks.onCameraPreset("tactical"));
-    this.cameraPresetWideEl!.addEventListener("click", () => callbacks.onCameraPreset("wide"));
+    this.cameraPresetChaseEl!.addEventListener("click", () => callbacks.onCameraPreset("chase"));
     this.cameraPresetCloseEl!.addEventListener("click", () => callbacks.onCameraPreset("close"));
   }
 
@@ -187,7 +187,7 @@ export class HudController {
       !this.cameraModeSelectEl ||
       !this.cameraTargetSelectEl ||
       !this.cameraPresetTacticalEl ||
-      !this.cameraPresetWideEl ||
+      !this.cameraPresetChaseEl ||
       !this.cameraPresetCloseEl ||
       !this.playPauseEl ||
       !this.timeScaleEl ||
