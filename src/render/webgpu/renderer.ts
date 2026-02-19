@@ -33,6 +33,13 @@ const domainColor = (entity: EntityState): [number, number, number, number] => {
 };
 
 const instanceSize = (entity: EntityState): number => (entity.kind === "weapon" ? 0.0035 : 0.0055);
+type WorldEntity = { entity: EntityState; world: [number, number, number] };
+const distSq3 = (a: [number, number, number], b: [number, number, number]): number => {
+  const dx = a[0] - b[0];
+  const dy = a[1] - b[1];
+  const dz = a[2] - b[2];
+  return dx * dx + dy * dy + dz * dz;
+};
 
 export class WebGpuCombatRenderer implements Renderer {
   private readonly canvas: HTMLCanvasElement;
@@ -124,7 +131,15 @@ export class WebGpuCombatRenderer implements Renderer {
       return;
     }
 
-    this.cameraState = updateCameraState(this.cameraState, simContext.cameraMode, dtSec);
+    const worldEntities = this.toWorldEntities(frame.entities);
+    const entityLockTarget = this.resolveEntityLockTarget(worldEntities, simContext.cameraTargetEntityId);
+    this.cameraState = updateCameraState(this.cameraState, {
+      mode: simContext.cameraMode,
+      dtSec,
+      input: simContext.userInput,
+      presetRequest: simContext.cameraPresetRequest,
+      entityLockTarget
+    });
     const aspect = this.canvas.width / this.canvas.height;
     const projection = mat4Perspective((50 * Math.PI) / 180, aspect, 0.01, 100);
     const view = mat4LookAt(this.cameraState.eye, this.cameraState.target, this.cameraState.up);
@@ -132,8 +147,8 @@ export class WebGpuCombatRenderer implements Renderer {
 
     this.writeUniforms(viewProj);
 
-    const entityData = this.buildEntityInstances(frame.entities);
-    const trailData = this.buildTrailInstances(frame.entities);
+    const entityData = this.buildEntityInstances(worldEntities);
+    const trailData = this.buildTrailInstances(worldEntities);
     const eventData = this.buildEventInstances(frame);
 
     this.writeInstanceData("entity", entityData);
@@ -275,11 +290,10 @@ export class WebGpuCombatRenderer implements Renderer {
     this.device.queue.writeBuffer(this.spriteUniformBuffer, 0, asGpuSource(viewProj));
   }
 
-  private buildEntityInstances(entities: EntityState[]): Float32Array {
-    const data = new Float32Array(entities.length * 8);
+  private buildEntityInstances(worldEntities: WorldEntity[]): Float32Array {
+    const data = new Float32Array(worldEntities.length * 8);
     let i = 0;
-    for (const entity of entities) {
-      const world = ecefToWorld(llaToEcef(entity.pose.positionLlaDegM));
+    for (const { entity, world } of worldEntities) {
       const color = domainColor(entity);
       data.set([world[0], world[1], world[2], instanceSize(entity), color[0], color[1], color[2], color[3]], i);
       i += 8;
@@ -287,9 +301,8 @@ export class WebGpuCombatRenderer implements Renderer {
     return data;
   }
 
-  private buildTrailInstances(entities: EntityState[]): Float32Array {
-    for (const entity of entities) {
-      const world = ecefToWorld(llaToEcef(entity.pose.positionLlaDegM));
+  private buildTrailInstances(worldEntities: WorldEntity[]): Float32Array {
+    for (const { entity, world } of worldEntities) {
       const history = this.trails.get(entity.id) ?? [];
       history.push(world);
       if (history.length > TRAIL_HISTORY) {
@@ -299,7 +312,7 @@ export class WebGpuCombatRenderer implements Renderer {
     }
 
     const out: number[] = [];
-    for (const entity of entities) {
+    for (const { entity } of worldEntities) {
       const history = this.trails.get(entity.id);
       if (!history) {
         continue;
@@ -327,6 +340,39 @@ export class WebGpuCombatRenderer implements Renderer {
       out.push(world[0], world[1], world[2], 0.009, color[0], color[1], color[2], color[3]);
     }
     return new Float32Array(out);
+  }
+
+  private toWorldEntities(entities: EntityState[]): WorldEntity[] {
+    return entities.map((entity) => ({
+      entity,
+      world: ecefToWorld(llaToEcef(entity.pose.positionLlaDegM))
+    }));
+  }
+
+  private resolveEntityLockTarget(
+    worldEntities: WorldEntity[],
+    targetEntityId: string | undefined
+  ): [number, number, number] | null {
+    if (worldEntities.length === 0) {
+      return null;
+    }
+    if (targetEntityId) {
+      const direct = worldEntities.find((item) => item.entity.id === targetEntityId);
+      if (direct) {
+        return direct.world;
+      }
+    }
+    let best = worldEntities[0];
+    let bestDistance = distSq3(best.world, this.cameraState.target);
+    for (let i = 1; i < worldEntities.length; i += 1) {
+      const candidate = worldEntities[i];
+      const d = distSq3(candidate.world, this.cameraState.target);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = candidate;
+      }
+    }
+    return best.world;
   }
 
   private writeInstanceData(kind: "entity" | "trail" | "event", data: Float32Array): void {

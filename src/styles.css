@@ -62,7 +62,8 @@ body,
 }
 
 button,
-input[type="range"] {
+input[type="range"],
+select {
   width: 100%;
 }
 
@@ -77,6 +78,25 @@ button {
 
 button:hover {
   border-color: var(--amber);
+}
+
+select {
+  background: #0d351c;
+  color: var(--phosphor);
+  border: 1px solid rgba(125, 255, 156, 0.45);
+  padding: 0.35rem 0.5rem;
+  font-family: inherit;
+}
+
+.camera-presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.35rem;
+}
+
+.camera-presets button {
+  padding: 0.35rem 0.2rem;
+  font-size: 0.8rem;
 }
 
 .toggles {
@@ -96,4 +116,3 @@ button:hover {
     border-top: 1px solid rgba(125, 255, 156, 0.25);
   }
 }
-

@@ -1,3 +1,5 @@
+import type { CameraMode, CameraPreset } from "../render";
+
 export interface HudState {
   playing: boolean;
   timeScale: number;
@@ -5,6 +7,8 @@ export interface HudState {
   showGrid: boolean;
   showTrails: boolean;
   showEvents: boolean;
+  cameraMode: CameraMode;
+  cameraTargetEntityId: string | null;
 }
 
 export interface HudCallbacks {
@@ -12,6 +16,9 @@ export interface HudCallbacks {
   onTimeScale: (scale: number) => void;
   onTimeline: (normalized: number) => void;
   onLayerToggle: (state: Pick<HudState, "showGrid" | "showTrails" | "showEvents">) => void;
+  onCameraMode: (mode: CameraMode) => void;
+  onCameraTarget: (entityId: string | null) => void;
+  onCameraPreset: (preset: CameraPreset) => void;
 }
 
 export class HudController {
@@ -22,6 +29,16 @@ export class HudController {
   private readonly frameModelEl = document.querySelector<HTMLElement>("#frameModel");
 
   private readonly cameraModeEl = document.querySelector<HTMLElement>("#cameraMode");
+
+  private readonly cameraModeSelectEl = document.querySelector<HTMLSelectElement>("#cameraModeSelect");
+
+  private readonly cameraTargetSelectEl = document.querySelector<HTMLSelectElement>("#cameraTargetSelect");
+
+  private readonly cameraPresetTacticalEl = document.querySelector<HTMLButtonElement>("#cameraPresetTactical");
+
+  private readonly cameraPresetWideEl = document.querySelector<HTMLButtonElement>("#cameraPresetWide");
+
+  private readonly cameraPresetCloseEl = document.querySelector<HTMLButtonElement>("#cameraPresetClose");
 
   private readonly playPauseEl = document.querySelector<HTMLButtonElement>("#playPause");
 
@@ -41,7 +58,9 @@ export class HudController {
     timelineNormalized: 0,
     showGrid: true,
     showTrails: true,
-    showEvents: true
+    showEvents: true,
+    cameraMode: "static",
+    cameraTargetEntityId: null
   };
 
   constructor(callbacks: HudCallbacks) {
@@ -76,6 +95,23 @@ export class HudController {
     this.toggleGridEl!.addEventListener("change", emitLayerToggle);
     this.toggleTrailsEl!.addEventListener("change", emitLayerToggle);
     this.toggleEventsEl!.addEventListener("change", emitLayerToggle);
+
+    this.cameraModeSelectEl!.addEventListener("change", () => {
+      const mode = this.cameraModeSelectEl!.value as CameraMode;
+      this.state.cameraMode = mode;
+      this.setCameraMode(mode);
+      callbacks.onCameraMode(mode);
+    });
+
+    this.cameraTargetSelectEl!.addEventListener("change", () => {
+      const id = this.cameraTargetSelectEl!.value || null;
+      this.state.cameraTargetEntityId = id;
+      callbacks.onCameraTarget(id);
+    });
+
+    this.cameraPresetTacticalEl!.addEventListener("click", () => callbacks.onCameraPreset("tactical"));
+    this.cameraPresetWideEl!.addEventListener("click", () => callbacks.onCameraPreset("wide"));
+    this.cameraPresetCloseEl!.addEventListener("click", () => callbacks.onCameraPreset("close"));
   }
 
   setStatus(text: string): void {
@@ -101,6 +137,38 @@ export class HudController {
       const label = cameraMode === "entityLock" ? "Entity Lock" : cameraMode[0].toUpperCase() + cameraMode.slice(1);
       this.cameraModeEl.textContent = `Camera: ${label}`;
     }
+    if (this.cameraModeSelectEl) {
+      this.cameraModeSelectEl.value = cameraMode;
+    }
+  }
+
+  setCameraTargets(entityIds: string[], selectedEntityId: string | null): void {
+    if (!this.cameraTargetSelectEl) {
+      return;
+    }
+    const currentValues = Array.from(this.cameraTargetSelectEl.options).map((option) => option.value);
+    const desiredValues = ["", ...entityIds];
+    const isSame =
+      currentValues.length === desiredValues.length &&
+      currentValues.every((value, index) => value === desiredValues[index]);
+
+    if (!isSame) {
+      this.cameraTargetSelectEl.innerHTML = "";
+      const nearestOption = document.createElement("option");
+      nearestOption.value = "";
+      nearestOption.textContent = "Nearest";
+      this.cameraTargetSelectEl.append(nearestOption);
+      for (const id of entityIds) {
+        const option = document.createElement("option");
+        option.value = id;
+        option.textContent = id;
+        this.cameraTargetSelectEl.append(option);
+      }
+    }
+
+    const selected = selectedEntityId && entityIds.includes(selectedEntityId) ? selectedEntityId : "";
+    this.cameraTargetSelectEl.value = selected;
+    this.state.cameraTargetEntityId = selected || null;
   }
 
   setTimeline(normalized: number): void {
@@ -116,6 +184,11 @@ export class HudController {
       !this.clockEl ||
       !this.frameModelEl ||
       !this.cameraModeEl ||
+      !this.cameraModeSelectEl ||
+      !this.cameraTargetSelectEl ||
+      !this.cameraPresetTacticalEl ||
+      !this.cameraPresetWideEl ||
+      !this.cameraPresetCloseEl ||
       !this.playPauseEl ||
       !this.timeScaleEl ||
       !this.timelineEl ||

@@ -18,6 +18,21 @@
           <p id="clock">T+0.0s</p>
         </div>
         <div class="controls">
+          <label for="cameraModeSelect">Camera Mode</label>
+          <select id="cameraModeSelect">
+            <option value="static">Static</option>
+            <option value="orbit">Orbit</option>
+            <option value="entityLock">Entity Lock</option>
+          </select>
+          <label for="cameraTargetSelect">Lock Target</label>
+          <select id="cameraTargetSelect">
+            <option value="">Nearest</option>
+          </select>
+          <div class="camera-presets">
+            <button id="cameraPresetTactical" type="button">Tactical</button>
+            <button id="cameraPresetWide" type="button">Wide</button>
+            <button id="cameraPresetClose" type="button">Close</button>
+          </div>
           <button id="playPause">Pause</button>
           <label for="timeScale">Time Scale</label>
           <input id="timeScale" type="range" min="0.1" max="8" step="0.1" value="1" />
