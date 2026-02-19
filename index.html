@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Threat Vector</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene" aria-label="Threat Vector Scene"></canvas>
+      <aside id="hud">
+        <h1>THREAT VECTOR</h1>
+        <div class="meta">
+          <p>Mode: Hybrid Retro Future</p>
+          <p id="frameModel">Frame Model: ECEF</p>
+          <p id="cameraMode">Camera: Static</p>
+          <p id="status">Status: Initializing...</p>
+          <p id="clock">T+0.0s</p>
+        </div>
+        <div class="controls">
+          <button id="playPause">Pause</button>
+          <label for="timeScale">Time Scale</label>
+          <input id="timeScale" type="range" min="0.1" max="8" step="0.1" value="1" />
+          <label for="timeline">Timeline</label>
+          <input id="timeline" type="range" min="0" max="1" step="0.001" value="0" />
+          <div class="toggles">
+            <label><input id="toggleGrid" type="checkbox" checked /> Grid</label>
+            <label><input id="toggleTrails" type="checkbox" checked /> Trails</label>
+            <label><input id="toggleEvents" type="checkbox" checked /> Events</label>
+          </div>
+        </div>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

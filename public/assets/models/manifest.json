@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "f16_faceted",
+      "path": "/assets/models/f16_faceted.glb",
+      "domain": "air"
+    },
+    {
+      "id": "kc135_faceted",
+      "path": "/assets/models/kc135_faceted.glb",
+      "domain": "air"
+    },
+    {
+      "id": "frigate_faceted",
+      "path": "/assets/models/frigate_faceted.glb",
+      "domain": "sea"
+    },
+    {
+      "id": "convoy_faceted",
+      "path": "/assets/models/convoy_faceted.glb",
+      "domain": "ground"
+    },
+    {
+      "id": "satellite_faceted",
+      "path": "/assets/models/satellite_faceted.glb",
+      "domain": "space"
+    },
+    {
+      "id": "aam_faceted",
+      "path": "/assets/models/aam_faceted.glb",
+      "domain": "air"
+    }
+  ]
+}
+
