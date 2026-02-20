@@ -45,5 +45,13 @@ describe("timeline store", () => {
     expect(near).toHaveLength(1);
     expect(near[0].id).toBe("e0");
   });
-});
 
+  it("provides runtime ECEF samples without requiring LLA roundtrip for render path", () => {
+    const timeline = new TimelineStore();
+    timeline.setFrames([frameAt(0, 0), frameAt(10, 10)]);
+    const runtime = timeline.sampleAtRuntime(5);
+    expect(runtime.entities).toHaveLength(1);
+    expect(runtime.entities[0].positionEcefM).toHaveLength(3);
+    expect(Number.isFinite(runtime.entities[0].positionEcefM[0])).toBe(true);
+  });
+});

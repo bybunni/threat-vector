@@ -1,4 +1,14 @@
-import { WGS84_A, WGS84_B, ecefToWorld, llaToEcef, mat4LookAt, mat4Multiply, mat4Perspective, nedBasisAtLla } from "../../core/math";
+import {
+  WGS84_A,
+  WGS84_B,
+  ecefToLla,
+  ecefToWorld,
+  llaToEcef,
+  mat4LookAt,
+  mat4Multiply,
+  mat4Perspective,
+  nedBasisAtLla
+} from "../../core/math";
 import type { EntityState, FrameMessage } from "../../core/schema";
 import { createGlobeGridPass, createSpritePass } from "../passes";
 import type { RenderOptions, Renderer, SimulationContext } from "../types";
@@ -42,7 +52,8 @@ const domainColor = (entity: EntityState): [number, number, number, number] => {
 const depthSpriteWorldSize = (entity: EntityState): number =>
   (entity.kind === "weapon" ? WEAPON_ICON_SIZE_M : PLATFORM_ICON_SIZE_M) / WGS84_A;
 type Vec3 = [number, number, number];
-type WorldEntity = { entity: EntityState; world: Vec3; ecef: Vec3 };
+type RuntimeRenderableEntityState = EntityState & { positionEcefM?: Vec3 };
+type WorldEntity = { entity: RuntimeRenderableEntityState; world: Vec3; ecef: Vec3 };
 export interface CameraDebugData {
   chaseEnabled: boolean;
   eyeEcefM: Vec3;
@@ -441,9 +452,9 @@ export class WebGpuCombatRenderer implements Renderer {
     return new Float32Array(out);
   }
 
-  private toWorldEntities(entities: EntityState[]): WorldEntity[] {
+  private toWorldEntities(entities: RuntimeRenderableEntityState[]): WorldEntity[] {
     return entities.map((entity) => {
-      const ecef = llaToEcef(entity.pose.positionLlaDegM);
+      const ecef = entity.positionEcefM ?? llaToEcef(entity.pose.positionLlaDegM);
       return {
         entity,
         ecef,
@@ -485,7 +496,7 @@ export class WebGpuCombatRenderer implements Renderer {
     baseDistanceMeters: number;
     baseDistanceWorld: number;
   } {
-    const lla = lockEntity.entity.pose.positionLlaDegM;
+    const lla = ecefToLla(lockEntity.ecef);
     const bodyToNed = lockEntity.entity.pose.orientationBodyToNedQuat;
     const forwardNedRaw = quatRotateVec(bodyToNed, [1, 0, 0]);
     const forwardNed = normalize3(forwardNedRaw);

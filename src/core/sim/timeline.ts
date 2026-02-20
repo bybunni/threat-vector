@@ -1,4 +1,4 @@
-import { ecefToLla, llaToEcef, quatNormalize, quatSlerp, lerp3 } from "../math";
+import { ecefToLla, llaToEcef, lerp3, quatNormalize, quatSlerp } from "../math";
 import type { FrameMessage, EntityState } from "../schema";
 
 interface EntitySample {
@@ -10,6 +10,16 @@ interface Range {
   start: number;
   end: number;
   duration: number;
+}
+
+export interface RuntimeEntityState extends EntityState {
+  positionEcefM: [number, number, number];
+}
+
+export interface RuntimeFrameMessage {
+  t: number;
+  entities: RuntimeEntityState[];
+  events?: NonNullable<FrameMessage["events"]>;
 }
 
 const cloneEntity = (state: EntityState): EntityState => ({
@@ -36,15 +46,19 @@ const upperBoundByTime = (samples: EntitySample[], t: number): number => {
   return low;
 };
 
-const interpolateEntity = (a: EntitySample, b: EntitySample, t: number): EntityState => {
+const cloneRuntimeEntity = (state: EntityState): RuntimeEntityState => ({
+  ...cloneEntity(state),
+  positionEcefM: llaToEcef(state.pose.positionLlaDegM)
+});
+
+const interpolateEntityRuntime = (a: EntitySample, b: EntitySample, t: number): RuntimeEntityState => {
   if (a.t === b.t) {
-    return cloneEntity(a.state);
+    return cloneRuntimeEntity(a.state);
   }
   const alpha = Math.min(1, Math.max(0, (t - a.t) / (b.t - a.t)));
   const posAEcef = llaToEcef(a.state.pose.positionLlaDegM);
   const posBEcef = llaToEcef(b.state.pose.positionLlaDegM);
   const posEcef = lerp3(posAEcef, posBEcef, alpha);
-  const posLla = ecefToLla(posEcef);
   const rot = quatSlerp(
     quatNormalize(a.state.pose.orientationBodyToNedQuat),
     quatNormalize(b.state.pose.orientationBodyToNedQuat),
@@ -53,9 +67,10 @@ const interpolateEntity = (a: EntitySample, b: EntitySample, t: number): EntityS
   return {
     ...b.state,
     pose: {
-      positionLlaDegM: posLla,
+      ...b.state.pose,
       orientationBodyToNedQuat: rot
-    }
+    },
+    positionEcefM: posEcef
   };
 };
 
@@ -87,21 +102,37 @@ export class TimelineStore {
   }
 
   sampleAt(t: number): FrameMessage {
-    const entities: EntityState[] = [];
+    const runtime = this.sampleAtRuntime(t);
+    const entities: EntityState[] = runtime.entities.map((entity) => ({
+      ...entity,
+      pose: {
+        ...entity.pose,
+        positionLlaDegM: ecefToLla(entity.positionEcefM)
+      }
+    }));
+    return {
+      t,
+      entities,
+      events: this.eventsNear(t, 0.15)
+    };
+  }
+
+  sampleAtRuntime(t: number): RuntimeFrameMessage {
+    const entities: RuntimeEntityState[] = [];
     for (const samples of this.entityIndex.values()) {
       if (samples.length === 0) {
         continue;
       }
       const right = upperBoundByTime(samples, t);
       if (right <= 0) {
-        entities.push(cloneEntity(samples[0].state));
+        entities.push(cloneRuntimeEntity(samples[0].state));
         continue;
       }
       if (right >= samples.length) {
-        entities.push(cloneEntity(samples[samples.length - 1].state));
+        entities.push(cloneRuntimeEntity(samples[samples.length - 1].state));
         continue;
       }
-      entities.push(interpolateEntity(samples[right - 1], samples[right], t));
+      entities.push(interpolateEntityRuntime(samples[right - 1], samples[right], t));
     }
     return {
       t,
@@ -142,4 +173,3 @@ export class TimelineStore {
     this.eventIndex.sort((a, b) => a.t - b.t);
   }
 }
-

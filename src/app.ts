@@ -111,7 +111,7 @@ export class ThreatVectorApp {
   };
 
   private renderAtCurrentTime(dtSec: number): void {
-    const sample = this.timeline.sampleAt(this.currentTime);
+    const sample = this.timeline.sampleAtRuntime(this.currentTime);
     this.refreshCameraTargetOptions(sample.entities.map((entity) => entity.id));
     const simContext: SimulationContext = {
       cameraMode: this.cameraMode,
