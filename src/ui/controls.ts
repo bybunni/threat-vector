@@ -30,6 +30,8 @@ export class HudController {
 
   private readonly cameraModeEl = document.querySelector<HTMLElement>("#cameraMode");
 
+  private readonly cameraDebugEl = document.querySelector<HTMLElement>("#cameraDebug");
+
   private readonly cameraModeSelectEl = document.querySelector<HTMLSelectElement>("#cameraModeSelect");
 
   private readonly cameraTargetSelectEl = document.querySelector<HTMLSelectElement>("#cameraTargetSelect");
@@ -142,6 +144,20 @@ export class HudController {
     }
   }
 
+  setCameraDebug(
+    data: { chaseEnabled: boolean; eyeEcefM: [number, number, number]; rangeToTargetM: number } | null
+  ): void {
+    if (!this.cameraDebugEl) {
+      return;
+    }
+    if (!data || !data.chaseEnabled) {
+      this.cameraDebugEl.textContent = "Chase Cam: n/a";
+      return;
+    }
+    const [x, y, z] = data.eyeEcefM;
+    this.cameraDebugEl.textContent = `Chase Cam ECEF[m]: ${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)} | Range: ${data.rangeToTargetM.toFixed(1)} m`;
+  }
+
   setCameraTargets(entityIds: string[], selectedEntityId: string | null): void {
     if (!this.cameraTargetSelectEl) {
       return;
@@ -184,6 +200,7 @@ export class HudController {
       !this.clockEl ||
       !this.frameModelEl ||
       !this.cameraModeEl ||
+      !this.cameraDebugEl ||
       !this.cameraModeSelectEl ||
       !this.cameraTargetSelectEl ||
       !this.cameraPresetTacticalEl ||

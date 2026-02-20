@@ -11,6 +11,18 @@ const noInput = {
 const dist3 = (a: [number, number, number], b: [number, number, number]): number =>
   Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 
+const makeChasePose = () => {
+  const eye: [number, number, number] = [0.1, 0.2, 0.3];
+  const target: [number, number, number] = [0.0, 0.1, 0.2];
+  return {
+    eye,
+    target,
+    up: [0, 0, 1] as [number, number, number],
+    baseDistanceMeters: 4100,
+    baseDistanceWorld: dist3(eye, target)
+  };
+};
+
 describe("camera mode", () => {
   it("keeps static camera eye stable", () => {
     const state0 = createInitialCameraState();
@@ -67,11 +79,7 @@ describe("camera mode", () => {
   it("matches chase anchor when chase preset is enabled and no input is provided", () => {
     const state0 = createInitialCameraState();
     const chasePreset = applyCameraPreset(state0, "chase");
-    const chasePose = {
-      eye: [0.1, 0.2, 0.3] as [number, number, number],
-      target: [0.0, 0.1, 0.2] as [number, number, number],
-      up: [0, 0, 1] as [number, number, number]
-    };
+    const chasePose = makeChasePose();
     const state1 = updateCameraState(chasePreset, {
       mode: "entityLock",
       dtSec: 0.016,
@@ -87,11 +95,7 @@ describe("camera mode", () => {
 
   it("allows orbiting around a locked target in chase mode", () => {
     const state0 = applyCameraPreset(createInitialCameraState(), "chase");
-    const chasePose = {
-      eye: [0.1, 0.2, 0.3] as [number, number, number],
-      target: [0.0, 0.1, 0.2] as [number, number, number],
-      up: [0, 0, 1] as [number, number, number]
-    };
+    const chasePose = makeChasePose();
     const state1 = updateCameraState(state0, {
       mode: "entityLock",
       dtSec: 0.016,
@@ -110,11 +114,7 @@ describe("camera mode", () => {
 
   it("ignores pan input while chase mode is active", () => {
     const state0 = applyCameraPreset(createInitialCameraState(), "chase");
-    const chasePose = {
-      eye: [0.1, 0.2, 0.3] as [number, number, number],
-      target: [0.0, 0.1, 0.2] as [number, number, number],
-      up: [0, 0, 1] as [number, number, number]
-    };
+    const chasePose = makeChasePose();
     const baseline = updateCameraState(state0, {
       mode: "entityLock",
       dtSec: 0.016,
@@ -137,13 +137,60 @@ describe("camera mode", () => {
     expect(dist3(withPan.eye, baseline.eye)).toBeLessThan(1e-10);
   });
 
+  it("changes chase distance when zoom input is provided and clamps at 100m minimum", () => {
+    const state0 = applyCameraPreset(createInitialCameraState(), "chase");
+    const chasePose = makeChasePose();
+    const base = updateCameraState(state0, {
+      mode: "entityLock",
+      dtSec: 0.016,
+      input: noInput,
+      entityLockTarget: chasePose.target,
+      chasePose
+    });
+    const zoomedOut = updateCameraState(base, {
+      mode: "entityLock",
+      dtSec: 0.016,
+      input: {
+        orbitDelta: [0, 0],
+        panDelta: [0, 0],
+        zoomDelta: 0.35,
+        isInteracting: false
+      },
+      entityLockTarget: chasePose.target,
+      chasePose
+    });
+    const zoomedIn = updateCameraState(zoomedOut, {
+      mode: "entityLock",
+      dtSec: 0.016,
+      input: {
+        orbitDelta: [0, 0],
+        panDelta: [0, 0],
+        zoomDelta: -0.45,
+        isInteracting: false
+      },
+      entityLockTarget: chasePose.target,
+      chasePose
+    });
+    const minClamped = updateCameraState(zoomedIn, {
+      mode: "entityLock",
+      dtSec: 0.016,
+      input: {
+        orbitDelta: [0, 0],
+        panDelta: [0, 0],
+        zoomDelta: -50,
+        isInteracting: false
+      },
+      entityLockTarget: chasePose.target,
+      chasePose
+    });
+    expect(dist3(zoomedOut.eye, chasePose.target)).toBeGreaterThan(dist3(base.eye, chasePose.target));
+    expect(dist3(zoomedIn.eye, chasePose.target)).toBeLessThan(dist3(zoomedOut.eye, chasePose.target));
+    expect(minClamped.chaseDistanceMeters).toBeCloseTo(100, 6);
+  });
+
   it("recenters chase orbit offsets after interaction stops", () => {
     const state0 = applyCameraPreset(createInitialCameraState(), "chase");
-    const chasePose = {
-      eye: [0.1, 0.2, 0.3] as [number, number, number],
-      target: [0.0, 0.1, 0.2] as [number, number, number],
-      up: [0, 0, 1] as [number, number, number]
-    };
+    const chasePose = makeChasePose();
     const orbited = updateCameraState(state0, {
       mode: "entityLock",
       dtSec: 0.016,

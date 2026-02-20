@@ -15,14 +15,19 @@ struct VsOut {
 fn vs_main(
   @location(0) corner: vec2<f32>,
   @location(1) posSize: vec4<f32>,
-  @location(2) color: vec4<f32>
+  @location(2) sizeMode: f32,
+  @location(3) color: vec4<f32>
 ) -> VsOut {
   let world = vec4<f32>(posSize.xyz, 1.0);
   let clip = globals.view_proj * world;
-  let offset = corner * posSize.w;
+  let clipW = max(1e-6, abs(clip.w));
+  let depthSizeNdc = clamp(posSize.w / clipW, 0.00035, 0.07);
+  let depthOffset = corner * depthSizeNdc * clip.w;
+  let screenOffset = corner * posSize.w * clip.w;
+  let offset = select(depthOffset, screenOffset, sizeMode > 0.5);
 
   var out : VsOut;
-  out.position = vec4<f32>(clip.xy + offset * clip.w, clip.zw);
+  out.position = vec4<f32>(clip.xy + offset, clip.zw);
   out.color = color;
   return out;
 }
@@ -63,11 +68,12 @@ export const createSpritePass = (device: GPUDevice, format: GPUTextureFormat): S
           attributes: [{ shaderLocation: 0, offset: 0, format: "float32x2" }]
         },
         {
-          arrayStride: 8 * 4,
+          arrayStride: 9 * 4,
           stepMode: "instance",
           attributes: [
             { shaderLocation: 1, offset: 0, format: "float32x4" },
-            { shaderLocation: 2, offset: 4 * 4, format: "float32x4" }
+            { shaderLocation: 2, offset: 4 * 4, format: "float32" },
+            { shaderLocation: 3, offset: 5 * 4, format: "float32x4" }
           ]
         }
       ]
@@ -122,4 +128,3 @@ export const createSpritePass = (device: GPUDevice, format: GPUTextureFormat): S
     cornerVertexCount: 3
   };
 };
-

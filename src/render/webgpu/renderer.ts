@@ -1,4 +1,4 @@
-import { ecefToWorld, llaToEcef, mat4LookAt, mat4Multiply, mat4Perspective, nedBasisAtLla } from "../../core/math";
+import { WGS84_A, WGS84_B, ecefToWorld, llaToEcef, mat4LookAt, mat4Multiply, mat4Perspective, nedBasisAtLla } from "../../core/math";
 import type { EntityState, FrameMessage } from "../../core/schema";
 import { createGlobeGridPass, createSpritePass } from "../passes";
 import type { RenderOptions, Renderer, SimulationContext } from "../types";
@@ -8,6 +8,11 @@ const INITIAL_INSTANCE_BYTES = 64 * 1024;
 const TRAIL_HISTORY = 48;
 const CHASE_BEHIND_M = 4000;
 const CHASE_ABOVE_M = 900;
+const SPRITE_INSTANCE_FLOATS = 9;
+const SIZE_MODE_DEPTH_SCALED = 0;
+const SIZE_MODE_SCREEN_STABLE = 1;
+const PLATFORM_ICON_SIZE_M = 30;
+const WEAPON_ICON_SIZE_M = 8;
 
 const asGpuSource = (data: Float32Array): GPUAllowSharedBufferSource => {
   if (data.buffer instanceof ArrayBuffer && data.byteOffset === 0 && data.byteLength === data.buffer.byteLength) {
@@ -34,9 +39,15 @@ const domainColor = (entity: EntityState): [number, number, number, number] => {
   }
 };
 
-const instanceSize = (entity: EntityState): number => (entity.kind === "weapon" ? 0.0035 : 0.0055);
+const depthSpriteWorldSize = (entity: EntityState): number =>
+  (entity.kind === "weapon" ? WEAPON_ICON_SIZE_M : PLATFORM_ICON_SIZE_M) / WGS84_A;
 type Vec3 = [number, number, number];
 type WorldEntity = { entity: EntityState; world: Vec3; ecef: Vec3 };
+export interface CameraDebugData {
+  chaseEnabled: boolean;
+  eyeEcefM: Vec3;
+  rangeToTargetM: number;
+}
 
 const add3 = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const scale3 = (v: Vec3, s: number): Vec3 => [v[0] * s, v[1] * s, v[2] * s];
@@ -84,6 +95,8 @@ const worldDeltaFromEcefDelta = (baseEcef: Vec3, deltaEcef: Vec3): Vec3 => {
   const offsetWorld = ecefToWorld(add3(baseEcef, deltaEcef));
   return [offsetWorld[0] - baseWorld[0], offsetWorld[1] - baseWorld[1], offsetWorld[2] - baseWorld[2]];
 };
+
+const worldToEcef = (world: Vec3): Vec3 => [world[0] * WGS84_A, world[1] * WGS84_A, world[2] * WGS84_B];
 
 const distSq3 = (a: [number, number, number], b: [number, number, number]): number => {
   const dx = a[0] - b[0];
@@ -243,21 +256,39 @@ export class WebGpuCombatRenderer implements Renderer {
 
     if (options.showTrails && trailData.length > 0) {
       pass.setVertexBuffer(1, this.trailInstanceBuffer!);
-      pass.draw(this.spritePass.cornerVertexCount, trailData.length / 8, 0, 0);
+      pass.draw(this.spritePass.cornerVertexCount, trailData.length / SPRITE_INSTANCE_FLOATS, 0, 0);
     }
 
     if (entityData.length > 0) {
       pass.setVertexBuffer(1, this.entityInstanceBuffer!);
-      pass.draw(this.spritePass.cornerVertexCount, entityData.length / 8, 0, 0);
+      pass.draw(this.spritePass.cornerVertexCount, entityData.length / SPRITE_INSTANCE_FLOATS, 0, 0);
     }
 
     if (options.showEvents && eventData.length > 0) {
       pass.setVertexBuffer(1, this.eventInstanceBuffer!);
-      pass.draw(this.spritePass.cornerVertexCount, eventData.length / 8, 0, 0);
+      pass.draw(this.spritePass.cornerVertexCount, eventData.length / SPRITE_INSTANCE_FLOATS, 0, 0);
     }
 
     pass.end();
     this.device.queue.submit([encoder.finish()]);
+  }
+
+  getCameraDebugData(): CameraDebugData {
+    const eyeEcef = worldToEcef(this.cameraState.eye);
+    const targetEcef = worldToEcef(this.cameraState.target);
+    const rangeFallback = Math.hypot(
+      eyeEcef[0] - targetEcef[0],
+      eyeEcef[1] - targetEcef[1],
+      eyeEcef[2] - targetEcef[2]
+    );
+    const rangeToTargetM = this.cameraState.chaseEnabled
+      ? Math.max(0, this.cameraState.chaseDistanceMeters)
+      : rangeFallback;
+    return {
+      chaseEnabled: this.cameraState.chaseEnabled,
+      eyeEcefM: eyeEcef,
+      rangeToTargetM
+    };
   }
 
   private configureContext(): void {
@@ -346,12 +377,25 @@ export class WebGpuCombatRenderer implements Renderer {
   }
 
   private buildEntityInstances(worldEntities: WorldEntity[]): Float32Array {
-    const data = new Float32Array(worldEntities.length * 8);
+    const data = new Float32Array(worldEntities.length * SPRITE_INSTANCE_FLOATS);
     let i = 0;
     for (const { entity, world } of worldEntities) {
       const color = domainColor(entity);
-      data.set([world[0], world[1], world[2], instanceSize(entity), color[0], color[1], color[2], color[3]], i);
-      i += 8;
+      data.set(
+        [
+          world[0],
+          world[1],
+          world[2],
+          depthSpriteWorldSize(entity),
+          SIZE_MODE_DEPTH_SCALED,
+          color[0],
+          color[1],
+          color[2],
+          color[3]
+        ],
+        i
+      );
+      i += SPRITE_INSTANCE_FLOATS;
     }
     return data;
   }
@@ -376,7 +420,7 @@ export class WebGpuCombatRenderer implements Renderer {
       for (let i = 0; i < history.length; i += 2) {
         const alpha = (i + 1) / history.length;
         const point = history[i];
-        out.push(point[0], point[1], point[2], 0.0018, r, g, b, alpha * 0.3);
+        out.push(point[0], point[1], point[2], 0.0018, SIZE_MODE_SCREEN_STABLE, r, g, b, alpha * 0.3);
       }
     }
     return new Float32Array(out);
@@ -392,7 +436,7 @@ export class WebGpuCombatRenderer implements Renderer {
           : event.type === "intercept"
             ? [1.0, 0.2, 0.2, 0.95]
             : [1.0, 0.52, 0.28, 0.95];
-      out.push(world[0], world[1], world[2], 0.009, color[0], color[1], color[2], color[3]);
+      out.push(world[0], world[1], world[2], 0.009, SIZE_MODE_SCREEN_STABLE, color[0], color[1], color[2], color[3]);
     }
     return new Float32Array(out);
   }
@@ -434,7 +478,13 @@ export class WebGpuCombatRenderer implements Renderer {
     return best;
   }
 
-  private buildChasePose(lockEntity: WorldEntity): { eye: Vec3; target: Vec3; up: Vec3 } {
+  private buildChasePose(lockEntity: WorldEntity): {
+    eye: Vec3;
+    target: Vec3;
+    up: Vec3;
+    baseDistanceMeters: number;
+    baseDistanceWorld: number;
+  } {
     const lla = lockEntity.entity.pose.positionLlaDegM;
     const bodyToNed = lockEntity.entity.pose.orientationBodyToNedQuat;
     const forwardNedRaw = quatRotateVec(bodyToNed, [1, 0, 0]);
@@ -448,15 +498,17 @@ export class WebGpuCombatRenderer implements Renderer {
       -safeForwardNed[2] * CHASE_BEHIND_M - CHASE_ABOVE_M
     ];
     const chaseOffsetEcef = nedToEcefDelta(lla, chaseOffsetNed);
+    const baseDistanceMeters = Math.hypot(chaseOffsetNed[0], chaseOffsetNed[1], chaseOffsetNed[2]);
     const eyeEcef = add3(lockEntity.ecef, chaseOffsetEcef);
     const eye = ecefToWorld(eyeEcef);
     const target = lockEntity.world;
+    const baseDistanceWorld = Math.hypot(eye[0] - target[0], eye[1] - target[1], eye[2] - target[2]);
 
     const upEcef = nedToEcefDelta(lla, [0, 0, -1]);
     const upWorld = normalize3(worldDeltaFromEcefDelta(lockEntity.ecef, upEcef));
     const up: Vec3 = Math.hypot(upWorld[0], upWorld[1], upWorld[2]) < 1e-6 ? [0, 0, 1] : upWorld;
 
-    return { eye, target, up };
+    return { eye, target, up, baseDistanceMeters, baseDistanceWorld };
   }
 
   private computeNearPlane(): number {

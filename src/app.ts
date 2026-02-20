@@ -122,6 +122,9 @@ export class ThreatVectorApp {
     this.cameraPresetRequest = undefined;
     if (this.renderer.isReady()) {
       this.renderer.render(sample, dtSec, this.options, simContext);
+      this.hud.setCameraDebug(this.renderer.getCameraDebugData());
+    } else {
+      this.hud.setCameraDebug(null);
     }
     const elapsed = this.currentTime - this.range.start;
     const normalized = this.range.duration > 0 ? elapsed / this.range.duration : 0;

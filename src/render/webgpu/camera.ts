@@ -12,8 +12,9 @@ const ORBIT_PITCH_SENSITIVITY = Math.PI;
 const ZOOM_SENSITIVITY = 0.85;
 const CHASE_PITCH_OFFSET_MIN_RAD = -0.95;
 const CHASE_PITCH_OFFSET_MAX_RAD = 0.95;
-const CHASE_ZOOM_SCALE_MIN = 0.45;
-const CHASE_ZOOM_SCALE_MAX = 2.5;
+const CHASE_ZOOM_SENSITIVITY = 2.5;
+const CHASE_DISTANCE_MIN_M = 100;
+const CHASE_DISTANCE_MAX_M = 160_000;
 const CHASE_RECENTER_HALF_LIFE_SEC = 0.35;
 
 const CAMERA_PRESETS: Record<CameraPreset, { distance: number; pitchRad: number }> = {
@@ -74,7 +75,7 @@ export interface CameraState {
   chaseEnabled: boolean;
   chaseYawOffsetRad: number;
   chasePitchOffsetRad: number;
-  chaseZoomScale: number;
+  chaseDistanceMeters: number;
   eye: [number, number, number];
   target: [number, number, number];
   up: [number, number, number];
@@ -90,6 +91,8 @@ interface CameraUpdateParams {
     eye: [number, number, number];
     target: [number, number, number];
     up: [number, number, number];
+    baseDistanceMeters: number;
+    baseDistanceWorld: number;
   } | null;
 }
 
@@ -138,6 +141,13 @@ const toChaseBasis = (
   return { back, right: safeRight, up, distance };
 };
 
+const sanitizePositive = (value: number, fallback: number): number => {
+  if (Number.isFinite(value) && value > 0) {
+    return value;
+  }
+  return fallback;
+};
+
 export const createInitialCameraState = (): CameraState => {
   const preset = CAMERA_PRESETS.tactical;
   const target: [number, number, number] = [0, 0, 0];
@@ -152,7 +162,7 @@ export const createInitialCameraState = (): CameraState => {
     chaseEnabled: false,
     chaseYawOffsetRad: 0,
     chasePitchOffsetRad: 0,
-    chaseZoomScale: 1,
+    chaseDistanceMeters: 0,
     eye: frame.eye,
     target,
     up: frame.up
@@ -166,7 +176,7 @@ export const applyCameraPreset = (state: CameraState, preset: CameraPreset): Cam
       chaseEnabled: true,
       chaseYawOffsetRad: 0,
       chasePitchOffsetRad: 0,
-      chaseZoomScale: 1
+      chaseDistanceMeters: 0
     };
   }
   const p = CAMERA_PRESETS[preset];
@@ -178,7 +188,7 @@ export const applyCameraPreset = (state: CameraState, preset: CameraPreset): Cam
     chaseEnabled: false,
     chaseYawOffsetRad: 0,
     chasePitchOffsetRad: 0,
-    chaseZoomScale: 1,
+    chaseDistanceMeters: 0,
     pitchRad: nextPitch,
     distance: nextDistance,
     eye: frame.eye,
@@ -199,7 +209,7 @@ export const updateCameraState = (prev: CameraState, params: CameraUpdateParams)
   let distance = state.distance;
   let chaseYawOffsetRad = state.chaseYawOffsetRad;
   let chasePitchOffsetRad = state.chasePitchOffsetRad;
-  let chaseZoomScale = state.chaseZoomScale;
+  let chaseDistanceMeters = state.chaseDistanceMeters;
   let target = state.target;
 
   if (params.mode === "entityLock" && params.entityLockTarget) {
@@ -209,13 +219,18 @@ export const updateCameraState = (prev: CameraState, params: CameraUpdateParams)
   if (params.mode === "entityLock" && state.chaseEnabled && params.chasePose) {
     const lockTarget = params.entityLockTarget ?? params.chasePose.target;
     const basis = toChaseBasis(lockTarget, params.chasePose);
+    const baseDistanceMeters = sanitizePositive(params.chasePose.baseDistanceMeters, 1);
+    const baseDistanceWorld = sanitizePositive(params.chasePose.baseDistanceWorld, basis.distance);
+    if (!Number.isFinite(chaseDistanceMeters) || chaseDistanceMeters <= 0) {
+      chaseDistanceMeters = baseDistanceMeters;
+    }
 
     chaseYawOffsetRad += input.orbitDelta[0] * ORBIT_YAW_SENSITIVITY;
     chasePitchOffsetRad += input.orbitDelta[1] * ORBIT_PITCH_SENSITIVITY;
     chasePitchOffsetRad = clamp(chasePitchOffsetRad, CHASE_PITCH_OFFSET_MIN_RAD, CHASE_PITCH_OFFSET_MAX_RAD);
 
-    chaseZoomScale *= Math.exp(input.zoomDelta * ZOOM_SENSITIVITY);
-    chaseZoomScale = clamp(chaseZoomScale, CHASE_ZOOM_SCALE_MIN, CHASE_ZOOM_SCALE_MAX);
+    chaseDistanceMeters *= Math.exp(input.zoomDelta * CHASE_ZOOM_SENSITIVITY);
+    chaseDistanceMeters = clamp(chaseDistanceMeters, CHASE_DISTANCE_MIN_M, CHASE_DISTANCE_MAX_M);
 
     const hasOrbitInput = Math.abs(input.orbitDelta[0]) > 1e-9 || Math.abs(input.orbitDelta[1]) > 1e-9;
     if (!input.isInteracting && !hasOrbitInput) {
@@ -234,7 +249,9 @@ export const updateCameraState = (prev: CameraState, params: CameraUpdateParams)
       ),
       basis.back
     );
-    const eye = add3(lockTarget, scale3(back, basis.distance * chaseZoomScale));
+    const metersToWorld = sanitizePositive(baseDistanceWorld / baseDistanceMeters, basis.distance / baseDistanceMeters);
+    const desiredWorldDistance = chaseDistanceMeters * metersToWorld;
+    const eye = add3(lockTarget, scale3(back, desiredWorldDistance));
     const right = safeNormalize3(cross3(basis.up, back), basis.right);
     const up = safeNormalize3(cross3(back, right), basis.up);
 
@@ -242,7 +259,7 @@ export const updateCameraState = (prev: CameraState, params: CameraUpdateParams)
       ...state,
       chaseYawOffsetRad,
       chasePitchOffsetRad,
-      chaseZoomScale,
+      chaseDistanceMeters,
       target: lockTarget,
       eye,
       up
@@ -275,7 +292,7 @@ export const updateCameraState = (prev: CameraState, params: CameraUpdateParams)
     chaseEnabled: state.chaseEnabled,
     chaseYawOffsetRad,
     chasePitchOffsetRad,
-    chaseZoomScale,
+    chaseDistanceMeters,
     eye: frame.eye,
     target,
     up: frame.up
